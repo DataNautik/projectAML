@@ -251,17 +251,26 @@ def project_2d(Z: np.ndarray):
     return Z2, pca
 
 
-def plot_prior_vs_agg(Z_prior_2d: np.ndarray, Z_agg_2d: np.ndarray, Y: np.ndarray, outpath: str, title: str):
+def plot_prior_vs_agg(Z_prior_2d, Z_agg_2d, Y, outpath, title):
     plt.figure(figsize=(7, 6))
-    plt.scatter(Z_prior_2d[:, 0], Z_prior_2d[:, 1], s=2, alpha=0.2, c="gray", label="prior samples")
-    sc = plt.scatter(Z_agg_2d[:, 0], Z_agg_2d[:, 1], s=3, alpha=0.7, c=Y, cmap="tab10", label="aggregate posterior")
-    plt.colorbar(sc, ticks=range(10), label="digit")
+
+    # Prior as density background (much more readable)
+    plt.hexbin(
+        Z_prior_2d[:, 0], Z_prior_2d[:, 1],
+        gridsize=70, mincnt=1, linewidths=0, alpha=0.9
+    )
+
+    # Aggregate posterior on top
+    sc = plt.scatter(
+        Z_agg_2d[:, 0], Z_agg_2d[:, 1],
+        s=4, alpha=0.8, c=Y, cmap="tab10"
+    )
+
+    plt.colorbar(sc, ticks=range(10), label="digit label")
     plt.title(title)
-    plt.legend(loc="best")
     plt.tight_layout()
     plt.savefig(outpath, dpi=200)
     plt.close()
-
 
 # ============================================================
 # 4) Build encoder/decoder using vae_bernoulli's structure
