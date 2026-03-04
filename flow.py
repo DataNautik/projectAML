@@ -56,36 +56,30 @@ class MaskedCouplingLayer(nn.Module):
 
     def forward(self, z):
         """
-        Transform a batch of data through the coupling layer (from the base to data).
-
-        Parameters:
-        x: [torch.Tensor]
-            The input to the transformation of dimension `(batch_size, feature_dim)`
-        Returns:
-        z: [torch.Tensor]
-            The output of the transformation of dimension `(batch_size, feature_dim)`
-        sum_log_det_J: [torch.Tensor]
-            The sum of the log determinants of the Jacobian matrices of the forward transformations of dimension `(batch_size, feature_dim)`.
+        Forward transform: z -> x (base -> data) for a masked affine coupling layer.
         """
-        x = z
-        log_det_J = torch.zeros(z.shape[0])
+        b = self.mask.to(z.device).view(1, -1)  # shape (1, D) for broadcasting
+        z_masked = z * b
+
+        s = self.scale_net(z_masked)
+        t = self.translation_net(z_masked)
+
+        x = b * z + (1 - b) * (z * torch.exp(s) + t)
+        log_det_J = ((1 - b) * s).sum(dim=-1)
         return x, log_det_J
     
     def inverse(self, x):
         """
-        Transform a batch of data through the coupling layer (from data to the base).
-
-        Parameters:
-        z: [torch.Tensor]
-            The input to the inverse transformation of dimension `(batch_size, feature_dim)`
-        Returns:
-        x: [torch.Tensor]
-            The output of the inverse transformation of dimension `(batch_size, feature_dim)`
-        sum_log_det_J: [torch.Tensor]
-            The sum of the log determinants of the Jacobian matrices of the inverse transformations.
+        Inverse transform: x -> z (data -> base).
         """
-        z = x
-        log_det_J = torch.zeros(x.shape[0])
+        b = self.mask.to(x.device).view(1, -1)
+        x_masked = x * b
+
+        s = self.scale_net(x_masked)
+        t = self.translation_net(x_masked)
+
+        z = b * x + (1 - b) * ((x - t) * torch.exp(-s))
+        log_det_J = -((1 - b) * s).sum(dim=-1)
         return z, log_det_J
 
 
