@@ -192,35 +192,28 @@ class MaskedCouplingLayer(nn.Module):
         # Bound scaling to avoid extreme exp(s).
         return torch.tanh(raw_s) * self.scale_factor
 
-    def forward(self, z: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        b = self.mask  # (D,)
-        # Frozen part (passes through to condition networks)
-        z_masked = z * b  # (B, D)
-
-        raw_s = self.scale_net(z_masked)       # (B, D)
-        t = self.translation_net(z_masked)     # (B, D)
-        s = self._stabilized_scale(raw_s)      # (B, D)
-
-        # Transform only where (1-b)=1:
-        z_prime = b * z + (1 - b) * (z * torch.exp(s) + t)  # (B, D)
-
-        # logdet sums s over transformed dims only
-        log_det_J = ((1 - b) * s).sum(dim=-1)  # (B,)
-        return z_prime, log_det_J
-
-    def inverse(self, z_prime: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, z):
+        # mask: 1 means "keep", 0 means "transform"
         b = self.mask
-        z_prime_masked = z_prime * b
+        z_masked = z * b
 
-        raw_s = self.scale_net(z_prime_masked)
-        t = self.translation_net(z_prime_masked)
-        s = self._stabilized_scale(raw_s)
+        s = self.scale_net(z_masked)
+        t = self.translation_net(z_masked)
 
-        z = b * z_prime + (1 - b) * ((z_prime - t) * torch.exp(-s))
+        x = b * z + (1 - b) * (z * torch.exp(s) + t)
+        log_det_J = ((1 - b) * s).sum(dim=-1)
+        return x, log_det_J
 
-        # Inverse logdet is negative of forward logdet at corresponding point
-        log_det_J_inv = -((1 - b) * s).sum(dim=-1)  # (B,)
-        return z, log_det_J_inv
+    def inverse(self, x):
+        b = self.mask
+        x_masked = x * b
+
+        s = self.scale_net(x_masked)
+        t = self.translation_net(x_masked)
+
+        z = b * x + (1 - b) * ((x - t) * torch.exp(-s))
+        log_det_J = -((1 - b) * s).sum(dim=-1)
+        return z, log_det_J
 
 
 class Flow(nn.Module):
@@ -577,12 +570,19 @@ def plot_prior_vs_aggregate(
         label="prior density",
     )
 
-    # --- AGG POSTERIOR: on top, larger + more opaque ---
+    # ---- Subsample aggregate posterior for readability ----
+    np.random.seed(0)
+    n_show = min(5000, Z_agg.shape[0])
+    idx = np.random.choice(Z_agg.shape[0], n_show, replace=False)
+
+    Z_plot = Z_agg[idx]
+    Y_plot = Y_agg[idx]
+
     sc = plt.scatter(
-        Z_agg[:, 0], Z_agg[:, 1],
-        s=8,
-        alpha=0.90,
-        c=Y_agg,
+        Z_plot[:, 0], Z_plot[:, 1],
+        s=18,
+        alpha=0.95,
+        c=Y_plot,
         cmap="tab10",
         edgecolors="none",
         label="aggregate posterior",
