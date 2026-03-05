@@ -50,6 +50,7 @@ import torch.distributions as td
 import torch.utils.data as data
 from tqdm import tqdm
 
+from scipy.stats import gaussian_kde
 # sklearn only used when M > 2 for PCA visualization of latent samples
 from sklearn.decomposition import PCA
 
@@ -476,7 +477,7 @@ def train_vae(model: VAE, optimizer: torch.optim.Optimizer, loader: data.DataLoa
 
 
 @torch.no_grad()
-def eval_elbo(model: VAE, loader: data.DataLoader, device: torch.device,
+def eval_elbo_old(model: VAE, loader: data.DataLoader, device: torch.device,
               max_batches: Optional[int] = None) -> float:
     """
     Evaluate mean ELBO over (part of) a dataset.
@@ -490,6 +491,24 @@ def eval_elbo(model: VAE, loader: data.DataLoader, device: torch.device,
         xb = xb.to(device)
         elbos.append(model.elbo(xb).item())
     return float(np.mean(elbos)) if len(elbos) else float("nan")
+
+@torch.no_grad()
+def eval_elbo(model, loader, device) -> float:
+    model.eval()
+    total = 0.0
+    n = 0
+    for xb, _ in loader:
+        xb = xb.to(device)
+        q = model.encoder(xb)
+        z = q.rsample()
+        log_pxz = model.decoder(z).log_prob(xb)      # (B,)
+        log_pz = model.prior().log_prob(z)           # (B,)
+        log_qz = q.log_prob(z)                       # (B,)
+        elbo_vec = log_pxz + log_pz - log_qz         # (B,)
+        total += elbo_vec.sum().item()
+        n += xb.shape[0]
+    return total / n
+
 
 
 @torch.no_grad()
@@ -542,6 +561,40 @@ def project_to_2d(Z: np.ndarray) -> Tuple[np.ndarray, Optional[PCA]]:
     Z2 = pca.fit_transform(Z)
     return Z2, pca
 
+def kde_contour_background(
+    z: np.ndarray,
+    ax: plt.Axes,
+    gridsize: int = 150,
+    levels: int = 12,
+    padding: float = 0.5,
+    fill: bool = True,
+    alpha: float = 0.35,
+):
+    """
+    Draw KDE contours for 2D points Z (N,2).
+    Creates a grid, evaluates KDE, draws contour/contourf.
+    """
+    assert z.shape[1] == 2, "KDE contour needs 2D points"
+
+    x = z[:, 0]
+    y = z[:, 1]
+
+    xmin, xmax = x.min() - padding, x.max() + padding
+    ymin, ymax = y.min() - padding, y.max() + padding
+
+    xx, yy = np.meshgrid(
+        np.linspace(xmin, xmax, gridsize),
+        np.linspace(ymin, ymax, gridsize),
+    )
+    grid = np.vstack([xx.ravel(), yy.ravel()]) # (2, gridsize^2)
+
+    kde = gaussian_kde(np.vstack([x, y])) # fit KDE on samples
+    zz = kde(grid).reshape(xx.shape) # density on grid
+
+    if fill:
+        ax.contourf(xx, yy, zz, levels=levels, alpha=alpha, cmap="Greys") # filled density
+    ax.contour(xx, yy, zz, levels=levels, linewidths=1.0, alpha=min(alpha + 0.2, 0.8), colors="k")
+
 
 def plot_prior_vs_aggregate(
     Z_prior: np.ndarray,
@@ -555,20 +608,10 @@ def plot_prior_vs_aggregate(
       - prior shown as faint gray density/background
       - aggregate posterior on top (colored by label)
     """
-    plt.figure(figsize=(7, 6))
+    fig, ax = plt.subplots(figsize=(7, 6))
 
-    # --- PRIOR: render as faint density to avoid "gray fog" ---
-    # Hexbin is robust and makes differences visible immediately.
-    plt.hexbin(
-        Z_prior[:, 0], Z_prior[:, 1],
-        gridsize=80,
-        bins="log",
-        mincnt=1,
-        linewidths=0,
-        alpha=0.35,
-        cmap="Greys",
-        label="prior density",
-    )
+    # PRIOR as KDE contours
+    kde_contour_background(Z_prior, ax=ax, gridsize=200, levels=15, padding=0.5, fill=True, alpha=0.30)
 
     # ---- Subsample aggregate posterior for readability ----
     np.random.seed(0)

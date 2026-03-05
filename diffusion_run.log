@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/Users/eugene/Documents/[DTU] Advanced ML/Advanced_ML_exercises/projectAML/projectB.py", line 15, in <module>
+    import vae_bernoulli as vae_lib
+ModuleNotFoundError: No module named 'vae_bernoulli'
