@@ -408,7 +408,7 @@ class VAE(nn.Module):
         self.decoder = decoder
         self.encoder = encoder
 
-    def elbo(self, x: torch.Tensor) -> torch.Tensor:
+    def elbo_per_point(self, x: torch.Tensor) -> torch.Tensor:
         """
         Compute Monte Carlo ELBO for a batch x.
 
@@ -421,7 +421,7 @@ class VAE(nn.Module):
           q.log_prob(z): (B,)
 
         Returns:
-          scalar tensor (mean over batch)
+          ELBO per datapoint
         """
         q = self.encoder(x)               # q_\phi(z|x)
         z = q.rsample()                   # reparameterized sample (B, M)
@@ -431,8 +431,10 @@ class VAE(nn.Module):
         log_pz = pz.log_prob(z)           # (B,)
         log_qz = q.log_prob(z)            # (B,)
 
-        elbo_batch = log_pxz + log_pz - log_qz  # (B,)
-        return elbo_batch.mean()
+        return log_pxz + log_pz - log_qz  # (B,)
+
+    def elbo(self, x: torch.Tensor) -> torch.Tensor:
+        return self.elbo_per_point(x).mean()
 
     def loss(self, x: torch.Tensor) -> torch.Tensor:
         return -self.elbo(x)
@@ -477,36 +479,19 @@ def train_vae(model: VAE, optimizer: torch.optim.Optimizer, loader: data.DataLoa
 
 
 @torch.no_grad()
-def eval_elbo_old(model: VAE, loader: data.DataLoader, device: torch.device,
-              max_batches: Optional[int] = None) -> float:
+def eval_elbo(model: VAE, loader: data.DataLoader, device: torch.device) -> float:
     """
     Evaluate mean ELBO over (part of) a dataset.
     Returns scalar mean over all seen batches.
     """
     model.eval()
-    elbos = []
-    for i, (xb, _) in enumerate(loader):
-        if max_batches is not None and i >= max_batches:
-            break
-        xb = xb.to(device)
-        elbos.append(model.elbo(xb).item())
-    return float(np.mean(elbos)) if len(elbos) else float("nan")
-
-@torch.no_grad()
-def eval_elbo(model, loader, device) -> float:
-    model.eval()
     total = 0.0
     n = 0
     for xb, _ in loader:
         xb = xb.to(device)
-        q = model.encoder(xb)
-        z = q.rsample()
-        log_pxz = model.decoder(z).log_prob(xb)      # (B,)
-        log_pz = model.prior().log_prob(z)           # (B,)
-        log_qz = q.log_prob(z)                       # (B,)
-        elbo_vec = log_pxz + log_pz - log_qz         # (B,)
+        elbo_vec = model.elbo_per_point(xb)   # (B,)
         total += elbo_vec.sum().item()
-        n += xb.shape[0]
+        n += xb.size(0)
     return total / n
 
 
